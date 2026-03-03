@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  pending
+  paid
+}
+
+enum TransactionStatus {
+  pending
+  paid
+}
+
+enum TransactionType {
+  income
+  expense
+}
+
+enum EntityType {
+  customer
+  supplier
+}
+
+enum PeriodType {
+  Unico
+  Mensal
+  Bimestral
+  Trimestral
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  categories   Category[]
+  entities     Entity[]
+  transactions Transaction[]
+  invoices     Invoice[]
+  invoiceItems InvoiceItem[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id           String   @id @default(uuid())
+  userId       String
+  tokenHash    String
+  revokedAt    DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  type      TransactionType
+  color     String
+  createdAt DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId])
+}
+
+model Entity {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  type      EntityType
+  email     String?
+  phone     String?
+  document  String?
+  address   String?
+  createdAt DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  invoices     Invoice[]
+
+  @@index([userId])
+}
+
+model Transaction {
+  id            String            @id @default(uuid())
+  userId        String
+  description   String
+  amount        Decimal           @db.Decimal(14, 2)
+  type          TransactionType
+  date          DateTime          @db.Date
+  status        TransactionStatus @default(pending)
+  categoryId    String?
+  entityId      String?
+  paymentMethod String?
+  notes         String?
+  period        PeriodType        @default(Unico)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  entity   Entity?  @relation(fields: [entityId], references: [id], onDelete: SetNull)
+
+  invoiceItem InvoiceItem?
+
+  @@index([userId])
+  @@index([entityId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([type])
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  userId        String
+  entityId      String
+  number        String        @unique
+  issueDate     DateTime      @db.Date
+  dueDate       DateTime?     @db.Date
+  status        InvoiceStatus @default(pending)
+  totalAmount   Decimal       @db.Decimal(14, 2)
+  paymentMethod String?
+  receiptNumber String?
+  paidAt        DateTime?
+  notes         String?
+  createdAt     DateTime      @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  items InvoiceItem[]
+
+  @@index([userId])
+  @@index([entityId])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id            String   @id @default(uuid())
+  userId        String
+  invoiceId     String
+  transactionId String   @unique
+  createdAt     DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoice     Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([userId])
+}

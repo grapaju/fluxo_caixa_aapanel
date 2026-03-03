@@ -1,0 +1,5 @@
+## Pages
+- [Categorias - FluxoCash](/categories): Gerencie suas categorias de receitas e despesas, crie novas categorias personalizadas para organizar melhor suas finanças.
+- [Dashboard - FluxoCash](/dashboard): Visualize seu resumo financeiro, saldo atual, receitas e despesas do mês em um dashboard interativo.
+- [Relatórios - FluxoCash](/reports): Visualize relatórios detalhados das suas finanças, gráficos mensais e anuais, e exporte dados em PDF ou Excel.
+- [Transações - FluxoCash](/transactions): Gerencie suas receitas e despesas, adicione novas transações e controle o status de pagamento.
