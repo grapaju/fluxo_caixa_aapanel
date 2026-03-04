@@ -27,7 +27,7 @@
 6. Suba a API e valide `GET /health`.
 
 ## Auth
-- `POST /auth/signup` { email, password }
+- `POST /auth/signup` { email, password } (somente se `ALLOW_SIGNUP=true`; padrão: desabilitado)
 - `POST /auth/login` { email, password } -> { accessToken, user } + cookie `refresh_token`
 - `POST /auth/refresh` -> { accessToken, user } + cookie
 - `POST /auth/logout`

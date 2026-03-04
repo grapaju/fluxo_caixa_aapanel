@@ -35,6 +35,11 @@ function refreshCookieOptions() {
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/signup', async (request, reply) => {
+    if (!config.allowSignup) {
+      reply.status(403).send({ message: 'Cadastro desabilitado' });
+      return;
+    }
+
     const body = z.object({ email: z.string().email(), password: z.string().min(8) }).parse(request.body);
 
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
