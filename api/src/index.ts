@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
+import { ZodError } from 'zod';
 import { config } from './config.js';
 import { authRoutes } from './routes/auth.js';
 import { apiRoutes } from './routes/api.js';
@@ -32,6 +33,21 @@ await app.register(apiRoutes, { prefix: '/api' });
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
+
+  if (error instanceof ZodError) {
+    const issueMessages = error.issues
+      .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`)
+      .join('; ');
+
+    reply.status(400).send({
+      statusCode: 400,
+      error: 'Bad Request',
+      message: issueMessages || 'Dados inválidos',
+      issues: error.issues,
+    });
+    return;
+  }
+
   const statusCode = error.statusCode && typeof error.statusCode === 'number' ? error.statusCode : 500;
   reply.status(statusCode).send({ message: error.message || 'Internal error' });
 });

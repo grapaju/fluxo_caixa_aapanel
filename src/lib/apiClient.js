@@ -16,11 +16,14 @@ export function setAccessToken(token) {
 
 async function rawFetch(path, options = {}) {
   const url = `${API_BASE}${path}`;
+  const hasBody = options.body !== undefined && options.body !== null;
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const contentTypeHeader = hasBody && !isFormData ? { 'Content-Type': 'application/json' } : {};
   const response = await fetch(url, {
     ...options,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...contentTypeHeader,
       ...(options.headers || {})
     }
   });

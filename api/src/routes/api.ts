@@ -185,6 +185,13 @@ export async function apiRoutes(app: FastifyInstance) {
   });
 
   app.post('/transactions', async (request) => {
+    const rawBody = (request.body ?? {}) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(rawBody, 'amount') && rawBody.amount === null) {
+      const err: any = new Error('Campo "amount" não pode ser nulo');
+      err.statusCode = 400;
+      throw err;
+    }
+
     const body = z.object({
       description: z.string().min(1),
       amount: z.number().positive(),
@@ -218,6 +225,13 @@ export async function apiRoutes(app: FastifyInstance) {
 
   app.put('/transactions/:id', async (request) => {
     const { id } = idParam.parse(request.params);
+    const rawBody = (request.body ?? {}) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(rawBody, 'amount') && rawBody.amount === null) {
+      const err: any = new Error('Campo "amount" não pode ser nulo');
+      err.statusCode = 400;
+      throw err;
+    }
+
     const body = z.object({
       description: z.string().min(1).optional(),
       amount: z.number().positive().optional(),

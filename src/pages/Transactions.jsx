@@ -149,13 +149,18 @@ function Transactions() {
       return;
     }
     
-    // Converter valor com máscara para número
-    let amount = formData.amount;
-    if (typeof amount === 'string' && amount.startsWith('R$')) {
-      amount = amount.replace('R$ ', '').replace(/\./g, '').replace(',', '.');
-      amount = parseFloat(amount);
-    } else {
-      amount = parseFloat(amount);
+    // Converter valor com máscara para número (resiliente a espaços especiais do locale)
+    const rawAmount = String(formData.amount ?? '').trim();
+    const normalizedAmount = rawAmount
+      .replace(/\s/g, '')
+      .replace('R$', '')
+      .replace(/\./g, '')
+      .replace(',', '.');
+    const amount = Number(normalizedAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast({ title: "Erro", description: "Informe um valor válido maior que zero", variant: "destructive" });
+      return;
     }
     
     const transactionData = { ...formData, amount, entity_id: formData.entity_id || null };
