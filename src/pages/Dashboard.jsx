@@ -63,6 +63,35 @@ function Dashboard() {
     }).format(value);
   };
 
+  const getPendingStatusKey = (dateValue) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const dueDate = new Date(`${dateValue}T00:00:00`);
+    const diffMs = dueDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) return 'overdue';
+    if (diffDays <= 3) return 'due_soon';
+    return 'open';
+  };
+
+  const getStatusMeta = (transaction) => {
+    if (transaction.status === 'paid') {
+      return { label: 'Pago', className: 'text-emerald-400' };
+    }
+
+    const pendingKey = getPendingStatusKey(transaction.date);
+    if (pendingKey === 'overdue') {
+      return { label: 'Atrasado', className: 'text-red-400' };
+    }
+    if (pendingKey === 'due_soon') {
+      return { label: 'Próximo ao vencimento', className: 'text-orange-300' };
+    }
+
+    return { label: 'Aberto', className: 'text-amber-400' };
+  };
+
   const stats = [
     {
       title: 'Saldo Atual',
@@ -245,6 +274,7 @@ function Dashboard() {
                 <div className="space-y-4">
                   {recentTransactions.map((transaction) => {
                     const category = categories.find(c => c.id === transaction.categoryId);
+                    const statusMeta = getStatusMeta(transaction);
                     return (
                       <div key={transaction.id} className="flex items-center justify-between p-4 bg-slate-800/50 rounded-lg">
                         <div className="flex items-center space-x-3">
@@ -271,11 +301,7 @@ function Dashboard() {
                           }`}>
                             {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
                           </p>
-                          <p className={`text-xs ${
-                            transaction.status === 'paid' ? 'text-emerald-400' : 'text-amber-400'
-                          }`}>
-                            {transaction.status === 'paid' ? 'Pago' : 'Pendente'}
-                          </p>
+                          <p className={`text-xs ${statusMeta.className}`}>{statusMeta.label}</p>
                         </div>
                       </div>
                     );

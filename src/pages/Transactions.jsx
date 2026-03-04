@@ -82,11 +82,58 @@ function Transactions() {
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
   }, [eligibleInvoiceTransactions, selectedInvoiceTransactionIds]);
 
+  const getPendingStatusKey = (dateValue) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const dueDate = new Date(`${dateValue}T00:00:00`);
+    const diffMs = dueDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) return 'overdue';
+    if (diffDays <= 3) return 'due_soon';
+    return 'open';
+  };
+
+  const getStatusMeta = (transaction) => {
+    if (transaction.status === 'paid') {
+      return {
+        key: 'paid',
+        label: 'Pago',
+        className: 'bg-emerald-500/20 text-emerald-400'
+      };
+    }
+
+    const pendingKey = getPendingStatusKey(transaction.date);
+    if (pendingKey === 'overdue') {
+      return {
+        key: 'overdue',
+        label: 'Atrasado',
+        className: 'bg-red-500/20 text-red-400'
+      };
+    }
+
+    if (pendingKey === 'due_soon') {
+      return {
+        key: 'due_soon',
+        label: 'Próximo ao vencimento',
+        className: 'bg-orange-500/20 text-orange-300'
+      };
+    }
+
+    return {
+      key: 'open',
+      label: 'Aberto',
+      className: 'bg-amber-500/20 text-amber-400'
+    };
+  };
+
   const filteredTransactions = transactions
     .filter(t => {
       const matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesType = filterType === 'all' || t.type === filterType;
-      const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
+      const statusKey = t.status === 'paid' ? 'paid' : getPendingStatusKey(t.date);
+      const matchesStatus = filterStatus === 'all' || statusKey === filterStatus;
       return matchesSearch && matchesType && matchesStatus;
     })
     .sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -470,7 +517,7 @@ function Transactions() {
               <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" /><Input placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 bg-slate-800 border-slate-600" /></div>
               <div className="flex gap-2">
                 <Select value={filterType} onValueChange={setFilterType}><SelectTrigger className="w-32 bg-slate-800 border-slate-600"><Filter className="w-4 h-4 mr-2" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="income">Receitas</SelectItem><SelectItem value="expense">Despesas</SelectItem></SelectContent></Select>
-                <Select value={filterStatus} onValueChange={setFilterStatus}><SelectTrigger className="w-32 bg-slate-800 border-slate-600"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="paid">Pagos</SelectItem><SelectItem value="pending">Pendentes</SelectItem></SelectContent></Select>
+                <Select value={filterStatus} onValueChange={setFilterStatus}><SelectTrigger className="w-56 bg-slate-800 border-slate-600"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="paid">Pago</SelectItem><SelectItem value="open">Aberto</SelectItem><SelectItem value="due_soon">Próximo ao vencimento</SelectItem><SelectItem value="overdue">Atrasado</SelectItem></SelectContent></Select>
               </div>
             </div>
           </CardContent>
@@ -583,6 +630,7 @@ function Transactions() {
                   const linkedInvoice = ii ? (invoices || []).find(inv => inv.id === ii.invoice_id) : null;
                   const isInPendingInvoice = linkedInvoice?.status === 'pending';
                   const isInPaidInvoice = linkedInvoice?.status === 'paid';
+                  const statusMeta = getStatusMeta(t);
                   return (
                     <motion.div key={t.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className={`flex items-center justify-between p-4 rounded-lg border-l-4 ${t.status === 'paid' ? 'bg-emerald-900/20 border-l-emerald-500' : 'bg-slate-800/50 border-l-transparent'}`}>
                       <div className="flex items-center space-x-4">
@@ -615,7 +663,7 @@ function Transactions() {
                       <div className="flex items-center space-x-4">
                         <div className="text-right">
                           <p className={`font-semibold ${t.type === 'income' ? 'text-emerald-400' : 'text-red-400'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</p>
-                          <Badge variant={t.status === 'paid' ? 'default' : 'secondary'} className={t.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}>{t.status === 'paid' ? 'Pago' : 'Pendente'}</Badge>
+                          <Badge variant={statusMeta.key === 'paid' ? 'default' : 'secondary'} className={statusMeta.className}>{statusMeta.label}</Badge>
                           {linkedInvoice && (
                             <div className="mt-1">
                               <Badge className={linkedInvoice.status === 'paid' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-purple-500/10 text-purple-300'}>
