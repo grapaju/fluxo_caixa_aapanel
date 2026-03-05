@@ -9,6 +9,7 @@ datasource db {
 
 enum InvoiceStatus {
   pending
+  partial
   paid
 }
 
@@ -46,6 +47,7 @@ model User {
   transactions Transaction[]
   invoices     Invoice[]
   invoiceItems InvoiceItem[]
+  invoicePayments InvoicePayment[]
   refreshTokens RefreshToken[]
 }
 
@@ -142,10 +144,29 @@ model Invoice {
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Restrict)
   items InvoiceItem[]
+  payments InvoicePayment[]
 
   @@index([userId])
   @@index([entityId])
   @@index([status])
+}
+
+model InvoicePayment {
+  id            String   @id @default(uuid())
+  userId        String
+  invoiceId     String
+  amountPaid    Decimal  @db.Decimal(14, 2)
+  paymentDate   DateTime @db.Date
+  paymentMethod String?
+  receiptNumber String
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([userId])
 }
 
 model InvoiceItem {

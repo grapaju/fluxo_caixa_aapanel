@@ -9,6 +9,10 @@ function toIsoDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
+function roundToCents(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function periodToUi(value: any) {
   if (value === 'Mensal' || value === 'Bimestral' || value === 'Trimestral') return value;
   return 'Único';
@@ -56,6 +60,10 @@ function entityDto(e: any) {
 }
 
 function invoiceDto(i: any) {
+  const paidAmount = roundToCents(Number(i._paidAmount ?? 0));
+  const totalAmount = Number(i.totalAmount);
+  const balanceDue = roundToCents(Math.max(totalAmount - paidAmount, 0));
+
   return {
     id: i.id,
     user_id: i.userId,
@@ -64,12 +72,29 @@ function invoiceDto(i: any) {
     issue_date: toIsoDate(i.issueDate),
     due_date: i.dueDate ? toIsoDate(i.dueDate) : null,
     status: i.status,
-    total_amount: Number(i.totalAmount),
+    total_amount: totalAmount,
+    amount_paid: paidAmount,
+    balance_due: balanceDue,
+    payment_count: i._paymentCount ?? 0,
     payment_method: i.paymentMethod ?? null,
     receipt_number: i.receiptNumber ?? null,
     paid_at: i.paidAt ? i.paidAt.toISOString() : null,
     notes: i.notes ?? null,
     created_at: i.createdAt?.toISOString?.() ?? null,
+  };
+}
+
+function invoicePaymentDto(p: any) {
+  return {
+    id: p.id,
+    user_id: p.userId,
+    invoice_id: p.invoiceId,
+    amount_paid: Number(p.amountPaid),
+    payment_date: toIsoDate(p.paymentDate),
+    payment_method: p.paymentMethod ?? null,
+    receipt_number: p.receiptNumber,
+    notes: p.notes ?? null,
+    created_at: p.createdAt?.toISOString?.() ?? null,
   };
 }
 
@@ -286,13 +311,37 @@ export async function apiRoutes(app: FastifyInstance) {
 
   // Invoices + items
   app.get('/invoices', async (request) => {
-    const rows = await prisma.invoice.findMany({ where: { userId: request.user!.id }, orderBy: { createdAt: 'desc' } });
-    return rows.map(invoiceDto);
+    const rows = await prisma.invoice.findMany({
+      where: { userId: request.user!.id },
+      include: {
+        payments: {
+          select: { amountPaid: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map((invoice: any) => {
+      const paidAmount = invoice.payments.reduce((sum: number, payment: any) => sum + Number(payment.amountPaid), 0);
+      return invoiceDto({
+        ...invoice,
+        _paidAmount: paidAmount,
+        _paymentCount: invoice.payments.length,
+      });
+    });
   });
 
   app.get('/invoice-items', async (request) => {
     const rows = await prisma.invoiceItem.findMany({ where: { userId: request.user!.id }, orderBy: { createdAt: 'desc' } });
     return rows.map(invoiceItemDto);
+  });
+
+  app.get('/invoice-payments', async (request) => {
+    const rows = await prisma.invoicePayment.findMany({
+      where: { userId: request.user!.id },
+      orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
+    });
+    return rows.map(invoicePaymentDto);
   });
 
   app.post('/invoices', async (request, reply) => {
@@ -347,7 +396,118 @@ export async function apiRoutes(app: FastifyInstance) {
       },
     });
 
-    return invoiceDto(invoice);
+    return invoiceDto({ ...invoice, _paidAmount: 0, _paymentCount: 0 });
+  });
+
+  app.post('/invoices/:id/payments', async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    const body = z.object({
+      amount_paid: z.number().positive(),
+      payment_date: z.string().min(10).optional(),
+      payment_method: z.string().optional().nullable(),
+      notes: z.string().optional().nullable(),
+    }).parse(request.body || {});
+
+    const userId = request.user!.id;
+    const invoice = await prisma.invoice.findFirst({
+      where: { id, userId },
+      include: {
+        payments: true,
+      },
+    });
+
+    if (!invoice) {
+      reply.status(404).send({ message: 'Fatura não encontrada' });
+      return;
+    }
+
+    if (invoice.status === 'paid') {
+      const paidAmount = invoice.payments.reduce((sum: number, payment: any) => sum + Number(payment.amountPaid), 0);
+      reply.send(invoiceDto({ ...invoice, _paidAmount: paidAmount, _paymentCount: invoice.payments.length }));
+      return;
+    }
+
+    const paidAmount = roundToCents(invoice.payments.reduce((sum: number, payment: any) => sum + Number(payment.amountPaid), 0));
+    const totalAmount = Number(invoice.totalAmount);
+    const balanceDue = roundToCents(Math.max(totalAmount - paidAmount, 0));
+    const amountPaid = roundToCents(Number(body.amount_paid));
+
+    if (amountPaid > balanceDue) {
+      reply.status(400).send({ message: `Valor de pagamento maior que o saldo da fatura (${balanceDue.toFixed(2)})` });
+      return;
+    }
+
+    const paymentDate = body.payment_date ? new Date(body.payment_date) : new Date();
+    const payment = await prisma.invoicePayment.create({
+      data: {
+        userId,
+        invoiceId: id,
+        amountPaid: amountPaid as any,
+        paymentDate,
+        paymentMethod: body.payment_method || null,
+        receiptNumber: generateReceiptNumber(),
+        notes: body.notes || null,
+      },
+    });
+
+    const newPaidAmount = roundToCents(paidAmount + amountPaid);
+    const isFullyPaid = newPaidAmount >= roundToCents(totalAmount);
+
+    const items = await prisma.invoiceItem.findMany({ where: { invoiceId: id, userId } });
+    const transactionIds = items.map((i: any) => i.transactionId);
+    if (isFullyPaid) {
+      const linked = await prisma.transaction.findMany({ where: { id: { in: transactionIds }, userId } });
+
+      await prisma.transaction.updateMany({ where: { id: { in: transactionIds }, userId }, data: { status: 'paid' } });
+
+      const recurrences = linked
+        .filter((t: any) => t.status !== 'paid')
+        .filter((t: any) => t.period !== 'Unico')
+        .map((t: any) => {
+          const nextDate = getNextDate(t.date, t.period);
+          if (!nextDate) return null;
+          return {
+            userId,
+            description: t.description,
+            amount: t.amount,
+            type: t.type,
+            date: nextDate,
+            status: 'pending' as const,
+            categoryId: t.categoryId,
+            entityId: t.entityId,
+            paymentMethod: t.paymentMethod,
+            notes: t.notes,
+            period: t.period,
+          };
+        })
+        .filter(Boolean) as any[];
+
+      if (recurrences.length > 0) {
+        await prisma.transaction.createMany({ data: recurrences });
+      }
+    }
+
+    const updatedInvoice = await prisma.invoice.update({
+      where: { id },
+      data: {
+        status: (isFullyPaid ? 'paid' : 'partial') as any,
+        paidAt: isFullyPaid ? paymentDate : null,
+        receiptNumber: payment.receiptNumber,
+        paymentMethod: body.payment_method || invoice.paymentMethod || null,
+      } as any,
+      include: {
+        payments: true,
+      },
+    });
+
+    return {
+      invoice: invoiceDto({
+        ...updatedInvoice,
+        _paidAmount: newPaidAmount,
+        _paymentCount: updatedInvoice.payments.length,
+      }),
+      payment: invoicePaymentDto(payment),
+    };
   });
 
   app.post('/invoices/:id/pay', async (request, reply) => {
@@ -355,25 +515,45 @@ export async function apiRoutes(app: FastifyInstance) {
     const body = z.object({ payment_method: z.string().optional().nullable() }).parse(request.body || {});
 
     const userId = request.user!.id;
-    const invoice = await prisma.invoice.findFirst({ where: { id, userId } });
+    const invoice = await prisma.invoice.findFirst({
+      where: { id, userId },
+      include: {
+        payments: true,
+      },
+    });
     if (!invoice) {
       reply.status(404).send({ message: 'Fatura não encontrada' });
       return;
     }
 
-    if (invoice.status === 'paid') {
-      reply.send(invoiceDto(invoice));
+    const paidAmount = roundToCents(invoice.payments.reduce((sum: number, payment: any) => sum + Number(payment.amountPaid), 0));
+    const totalAmount = Number(invoice.totalAmount);
+    const balanceDue = roundToCents(Math.max(totalAmount - paidAmount, 0));
+
+    if (balanceDue <= 0) {
+      reply.send(invoiceDto({ ...invoice, _paidAmount: paidAmount, _paymentCount: invoice.payments.length }));
       return;
     }
+
+    const paymentDate = new Date();
+    const payment = await prisma.invoicePayment.create({
+      data: {
+        userId,
+        invoiceId: id,
+        amountPaid: balanceDue as any,
+        paymentDate,
+        paymentMethod: body.payment_method || null,
+        receiptNumber: generateReceiptNumber(),
+        notes: null,
+      },
+    });
 
     const items = await prisma.invoiceItem.findMany({ where: { invoiceId: id, userId } });
     const transactionIds = items.map((i: any) => i.transactionId);
     const linked = await prisma.transaction.findMany({ where: { id: { in: transactionIds }, userId } });
 
-    // marcar como pago
     await prisma.transaction.updateMany({ where: { id: { in: transactionIds }, userId }, data: { status: 'paid' } });
 
-    // criar recorrências para as transações que eram pendentes e recorrentes
     const recurrences = linked
       .filter((t: any) => t.status !== 'paid')
       .filter((t: any) => t.period !== 'Unico')
@@ -403,13 +583,20 @@ export async function apiRoutes(app: FastifyInstance) {
     const updatedInvoice = await prisma.invoice.update({
       where: { id },
       data: {
-        status: 'paid',
-        paidAt: new Date(),
-        receiptNumber: generateReceiptNumber(),
+        status: 'paid' as any,
+        paidAt: paymentDate,
+        receiptNumber: payment.receiptNumber,
         paymentMethod: body.payment_method || invoice.paymentMethod || null,
+      } as any,
+      include: {
+        payments: true,
       },
     });
 
-    return invoiceDto(updatedInvoice);
+    reply.send(invoiceDto({
+      ...updatedInvoice,
+      _paidAmount: roundToCents(Number(updatedInvoice.totalAmount)),
+      _paymentCount: updatedInvoice.payments.length,
+    }));
   });
 }

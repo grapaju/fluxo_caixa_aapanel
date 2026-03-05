@@ -19,7 +19,7 @@ import { CompanySettings } from '@/components/CompanySettings';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 
 function Transactions() {
-  const { transactions, categories, entities, invoices, invoiceItems, paymentMethods, periods, addTransaction, updateTransaction, deleteTransaction, createInvoice, markInvoicePaid } = useData();
+  const { transactions, categories, entities, invoices, invoiceItems, invoicePayments, paymentMethods, periods, addTransaction, updateTransaction, deleteTransaction, createInvoice, markInvoicePaid, registerInvoicePayment } = useData();
   const { toast } = useToast();
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,6 +33,12 @@ function Transactions() {
   const [invoicePaymentMethod, setInvoicePaymentMethod] = useState('');
   const [invoiceNotes, setInvoiceNotes] = useState('');
   const [selectedInvoiceTransactionIds, setSelectedInvoiceTransactionIds] = useState([]);
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+  const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
   const [formData, setFormData] = useState({
     description: '', amount: '', date: new Date().toISOString().split('T')[0],
     category_id: '', type: 'expense', payment_method: '', status: 'pending',
@@ -278,6 +284,47 @@ function Transactions() {
 
   const showToast = (feature) => toast({ title: `🚧 ${feature} não implementado!`, description: "Você pode solicitar esta funcionalidade no próximo prompt! 🚀" });
 
+  const openPaymentDialog = (invoice, balance) => {
+    setSelectedInvoiceForPayment({ ...invoice, balance });
+    setPaymentAmount(String(balance.toFixed(2)));
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentMethod(invoice.payment_method || '');
+    setPaymentNotes('');
+    setIsPaymentDialogOpen(true);
+  };
+
+  const handleRegisterInvoicePayment = async (event) => {
+    event.preventDefault();
+    if (!selectedInvoiceForPayment) return;
+
+    const amount = Number(String(paymentAmount || '').replace(',', '.'));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast({ title: 'Erro', description: 'Informe um valor de pagamento válido.', variant: 'destructive' });
+      return;
+    }
+
+    if (amount > selectedInvoiceForPayment.balance) {
+      toast({
+        title: 'Erro',
+        description: `O valor não pode ser maior que o saldo (${formatCurrency(selectedInvoiceForPayment.balance)}).`,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const result = await registerInvoicePayment({
+      invoiceId: selectedInvoiceForPayment.id,
+      amountPaid: amount,
+      paymentDate,
+      paymentMethod,
+      notes: paymentNotes,
+    });
+
+    if (result?.payment) {
+      setIsPaymentDialogOpen(false);
+    }
+  };
+
   return (
     <>
       <Helmet>
@@ -508,6 +555,74 @@ function Transactions() {
               </form>
             </DialogContent>
           </Dialog>
+
+            <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+              <DialogContent className="glass-effect border-slate-700 max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="text-white">Registrar Pagamento da Fatura</DialogTitle>
+                </DialogHeader>
+
+                <form className="space-y-4" onSubmit={handleRegisterInvoicePayment}>
+                  <div className="text-sm text-slate-300">
+                    <div>Fatura: <strong>{selectedInvoiceForPayment?.number}</strong></div>
+                    <div>Saldo em aberto: <strong>{formatCurrency(Number(selectedInvoiceForPayment?.balance || 0))}</strong></div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Valor recebido</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max={selectedInvoiceForPayment?.balance || undefined}
+                      value={paymentAmount}
+                      onChange={(e) => setPaymentAmount(e.target.value)}
+                      className="bg-slate-800 border-slate-600"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Data do pagamento</Label>
+                    <Input
+                      type="date"
+                      value={paymentDate}
+                      onChange={(e) => setPaymentDate(e.target.value)}
+                      className="bg-slate-800 border-slate-600"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Forma de pagamento</Label>
+                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                      <SelectTrigger className="bg-slate-800 border-slate-600"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                      <SelectContent>
+                        {paymentMethods.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Observações (opcional)</Label>
+                    <Input
+                      value={paymentNotes}
+                      onChange={(e) => setPaymentNotes(e.target.value)}
+                      className="bg-slate-800 border-slate-600"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-2">
+                    <Button type="button" variant="outline" className="border-slate-600" onClick={() => setIsPaymentDialogOpen(false)}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" className="bg-gradient-to-r from-emerald-500 to-blue-500">
+                      Registrar Pagamento
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 
@@ -536,18 +651,38 @@ function Transactions() {
                     const entity = entities.find(e => e.id === inv.entity_id);
                     const invItemIds = (invoiceItems || []).filter(ii => ii.invoice_id === inv.id).map(ii => ii.transaction_id);
                     const invTransactions = (transactions || []).filter(t => invItemIds.includes(t.id)).sort((a, b) => new Date(a.date) - new Date(b.date));
+                    const invPayments = (invoicePayments || [])
+                      .filter(p => p.invoice_id === inv.id)
+                      .sort((a, b) => new Date(b.payment_date + 'T00:00:00') - new Date(a.payment_date + 'T00:00:00'));
+                    const latestPayment = invPayments[0] || null;
                     const total = Number(inv.total_amount ?? invTransactions.reduce((sum, t) => sum + Number(t.amount || 0), 0));
+                    const amountPaid = Number(inv.amount_paid ?? invPayments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0));
+                    const balanceDue = Number(inv.balance_due ?? Math.max(total - amountPaid, 0));
+
+                    const statusClass = inv.status === 'paid'
+                      ? 'bg-emerald-900/20 border-l-emerald-500'
+                      : inv.status === 'partial'
+                        ? 'bg-amber-900/20 border-l-amber-500'
+                        : 'bg-slate-800/50 border-l-purple-500';
+
+                    const statusBadgeClass = inv.status === 'paid'
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : inv.status === 'partial'
+                        ? 'bg-amber-500/20 text-amber-300'
+                        : 'bg-purple-500/20 text-purple-300';
+
+                    const statusLabel = inv.status === 'paid' ? 'Paga' : inv.status === 'partial' ? 'Parcial' : 'Pendente';
 
                     return (
-                      <div key={inv.id} className={`flex items-center justify-between p-4 rounded-lg border-l-4 ${inv.status === 'paid' ? 'bg-emerald-900/20 border-l-emerald-500' : 'bg-slate-800/50 border-l-purple-500'}`}>
+                      <div key={inv.id} className={`flex items-center justify-between p-4 rounded-lg border-l-4 ${statusClass}`}>
                         <div>
                           <div className="flex items-center gap-2">
                             <div className="font-medium text-white">{inv.number || 'Fatura'}</div>
                             <Badge
                               variant={inv.status === 'paid' ? 'default' : 'secondary'}
-                              className={inv.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-300'}
+                              className={statusBadgeClass}
                             >
-                              {inv.status === 'paid' ? 'Paga' : 'Pendente'}
+                              {statusLabel}
                             </Badge>
                           </div>
                           <div className="text-sm text-slate-400 mt-1">
@@ -566,8 +701,10 @@ function Transactions() {
                         <div className="flex items-center gap-4">
                           <div className="text-right">
                             <div className="font-semibold text-white">{formatCurrency(total)}</div>
-                            {inv.status === 'paid' && inv.receipt_number && (
-                              <div className="text-xs text-emerald-400">Recibo: {inv.receipt_number}</div>
+                            <div className="text-xs text-slate-400">Recebido: {formatCurrency(amountPaid)}</div>
+                            <div className="text-xs text-amber-300">Saldo: {formatCurrency(balanceDue)}</div>
+                            {latestPayment?.receipt_number && (
+                              <div className="text-xs text-emerald-400">Últ. recibo: {latestPayment.receipt_number}</div>
                             )}
                           </div>
 
@@ -583,7 +720,20 @@ function Transactions() {
                               entity={entity}
                               items={invTransactions}
                               categoriesById={categoriesById}
+                              payment={inv.status === 'paid' ? null : latestPayment}
                             />
+
+                            {inv.status !== 'paid' && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="text-slate-400 hover:text-blue-400"
+                                title="Registrar pagamento parcial"
+                                onClick={() => openPaymentDialog(inv, balanceDue)}
+                              >
+                                <Plus className="w-4 h-4" />
+                              </Button>
+                            )}
 
                             {inv.status !== 'paid' && (
                               <Button

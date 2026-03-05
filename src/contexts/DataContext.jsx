@@ -27,6 +27,7 @@ export function DataProvider({ children }) {
   const [entities, setEntities] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [invoiceItems, setInvoiceItems] = useState([]);
+  const [invoicePayments, setInvoicePayments] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
@@ -36,18 +37,20 @@ export function DataProvider({ children }) {
       setEntities([]);
       setInvoices([]);
       setInvoiceItems([]);
+      setInvoicePayments([]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
     try {
-      const [tx, cat, ent, inv, invItems] = await Promise.all([
+      const [tx, cat, ent, inv, invItems, invPayments] = await Promise.all([
         apiRequest('/api/transactions'),
         apiRequest('/api/categories'),
         apiRequest('/api/entities'),
         apiRequest('/api/invoices'),
         apiRequest('/api/invoice-items'),
+        apiRequest('/api/invoice-payments'),
       ]);
 
       setTransactions(tx || []);
@@ -55,6 +58,7 @@ export function DataProvider({ children }) {
       setEntities(ent || []);
       setInvoices(inv || []);
       setInvoiceItems(invItems || []);
+      setInvoicePayments(invPayments || []);
     } catch (error) {
       toast({ title: 'Erro ao carregar dados', description: error.message, variant: 'destructive' });
     } finally {
@@ -203,6 +207,26 @@ export function DataProvider({ children }) {
     }
   };
 
+  const registerInvoicePayment = async ({ invoiceId, amountPaid, paymentDate, paymentMethod, notes }) => {
+    try {
+      const result = await apiRequest(`/api/invoices/${invoiceId}/payments`, {
+        method: 'POST',
+        body: {
+          amount_paid: amountPaid,
+          payment_date: paymentDate || undefined,
+          payment_method: paymentMethod || null,
+          notes: notes || null,
+        },
+      });
+
+      await fetchAll();
+      toast({ title: 'Pagamento registrado com sucesso!' });
+      return result;
+    } catch (error) {
+      toast({ title: 'Erro ao registrar pagamento parcial', description: error.message, variant: 'destructive' });
+    }
+  };
+
   const getMonthlyData = (year, month) => {
     const monthTransactions = transactions.filter(t => {
       const transactionDate = new Date(t.date);
@@ -220,6 +244,7 @@ export function DataProvider({ children }) {
     entities,
     invoices,
     invoiceItems,
+    invoicePayments,
     paymentMethods,
     periods,
     loading,
@@ -235,6 +260,7 @@ export function DataProvider({ children }) {
     getMonthlyData,
     createInvoice,
     markInvoicePaid,
+    registerInvoicePayment,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

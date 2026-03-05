@@ -5,7 +5,7 @@ import { FileCheck, Download, Building, CheckCircle } from 'lucide-react';
 import { generatePDF, formatCurrency, formatDate, getCompanyInfo, getCompanyLogo } from '@/lib/pdfGenerator';
 import { useToast } from '@/components/ui/use-toast';
 
-export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }) {
+export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById, payment = null }) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const receiptRef = useRef();
@@ -14,8 +14,8 @@ export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }
   const company = getCompanyInfo();
   const logo = getCompanyLogo();
 
-  const totalAmount = Number(invoice?.total_amount ?? items.reduce((sum, t) => sum + Number(t.amount || 0), 0));
-  const paymentDate = invoice?.paid_at ? invoice.paid_at.slice(0, 10) : new Date().toISOString().split('T')[0];
+  const totalAmount = Number(payment?.amount_paid ?? invoice?.total_amount ?? items.reduce((sum, t) => sum + Number(t.amount || 0), 0));
+  const paymentDate = payment?.payment_date || (invoice?.paid_at ? invoice.paid_at.slice(0, 10) : new Date().toISOString().split('T')[0]);
 
   const handleGeneratePDF = async () => {
     if (!receiptRef.current) return;
@@ -23,7 +23,7 @@ export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }
 
     try {
       const safeName = (entity?.name || 'Cliente').replace(/[\\/:*?"<>|]/g, '-');
-      const receiptNumber = invoice?.receipt_number || invoice?.number;
+      const receiptNumber = payment?.receipt_number || invoice?.receipt_number || invoice?.number;
       const fileName = `Recibo_${receiptNumber}_${safeName}.pdf`;
       const result = await generatePDF(receiptRef.current, fileName);
       if (!result.success) throw new Error(result.error);
@@ -37,7 +37,7 @@ export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }
     }
   };
 
-  if (!invoice || invoice.status !== 'paid' || !entity) return null;
+  if (!invoice || !entity || (!payment && invoice.status !== 'paid')) return null;
 
   return (
     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -55,7 +55,7 @@ export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <FileCheck className="w-5 h-5" />
-            Recibo - {invoice.receipt_number}
+            Recibo - {payment?.receipt_number || invoice.receipt_number}
           </DialogTitle>
         </DialogHeader>
 
@@ -88,7 +88,7 @@ export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }
                   <h2 className="text-3xl font-bold text-gray-800">RECIBO</h2>
                 </div>
                 <div className="bg-green-50 p-3 rounded border-l-4 border-green-600">
-                  <p className="font-semibold">Nº {invoice.receipt_number}</p>
+                  <p className="font-semibold">Nº {payment?.receipt_number || invoice.receipt_number}</p>
                   <p className="text-sm">Data do Pagamento: {formatDate(paymentDate)}</p>
                   <div className="flex items-center gap-1 mt-2">
                     <CheckCircle className="w-4 h-4 text-green-600" />
@@ -164,7 +164,7 @@ export function ReceiptGroupGenerator({ invoice, entity, items, categoriesById }
                     <p><strong>Valor Pago:</strong> {formatCurrency(totalAmount)}</p>
                   </div>
                   <div>
-                    <p><strong>Forma de Pagamento:</strong> {invoice.payment_method || 'Não informado'}</p>
+                    <p><strong>Forma de Pagamento:</strong> {payment?.payment_method || invoice.payment_method || 'Não informado'}</p>
                     <p><strong>Status:</strong> <span className="text-green-600 font-semibold ml-1">✓ RECEBIDO</span></p>
                   </div>
                 </div>
